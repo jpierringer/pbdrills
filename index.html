@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pickleball Red Light Green Light</title>
+<style>
+:root{--bg:#f2f5f1;--ink:#14231c;--mute:#5d6e65;--court:#2f6f7e;--kit:#3b8797;--line:#f4f7f2;--panel:#fff;--bd:#cdd8d1;--acc:#14231c;--accInk:#fff;
+--g:#2ecc71;--y:#f5c518;--r:#e5484d;--b:#4f8cff;--off:#d5ddd8}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1815;--ink:#eaf2ed;--mute:#97a99f;--court:#245866;--kit:#2c6c7a;--panel:#18241f;--bd:#2b3b34;--acc:#eaf2ed;--accInk:#0f1815;--off:#2a3631}}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:16px/1.4 "Avenir Next",Avenir,"Segoe UI",system-ui,sans-serif;padding:max(12px,env(safe-area-inset-top)) 14px max(16px,env(safe-area-inset-bottom));max-width:460px;margin:0 auto}
+h1{font-size:20px;margin:4px 0 10px;letter-spacing:-.01em}
+.seg{display:flex;gap:6px;margin-bottom:8px}
+.seg button{font-size:14px}
+.seg button,.ctl button{flex:1;padding:10px 6px;border:1px solid var(--bd);background:var(--panel);color:var(--ink);border-radius:10px;font:inherit;font-weight:600;cursor:pointer}
+.seg button[aria-pressed=true]{background:var(--acc);color:var(--accInk);border-color:var(--acc)}
+button:focus-visible{outline:3px solid var(--b);outline-offset:2px}
+.lights{display:flex;gap:10px;align-items:center;justify-content:center;background:#0d1512;border-radius:16px;padding:12px;margin:10px 0}
+.lamp{width:44px;height:44px;border-radius:50%;background:var(--off);transition:background .08s,box-shadow .08s}
+.lamp.on{box-shadow:0 0 22px 4px currentColor}
+.lamp.g.on{background:var(--g);color:var(--g)}.lamp.y.on{background:var(--y);color:var(--y)}
+.lamp.r.on{background:var(--r);color:var(--r)}.lamp.b.on{background:var(--b);color:var(--b)}
+.lamp{background:#2a3631}
+#say{text-align:center;min-height:62px;margin:4px 0 8px}
+#say b{display:block;font-size:26px;letter-spacing:-.02em}
+#say span{color:var(--mute);font-size:15px}
+canvas{width:100%;display:block;border-radius:14px;touch-action:manipulation}
+.ctl{display:flex;gap:8px;margin-top:10px}
+.ctl #go{flex:2;background:var(--g);color:#06260f;border-color:var(--g);font-size:17px}
+.meta{display:flex;justify-content:space-between;color:var(--mute);font-size:14px;margin:8px 2px 0}
+@media (prefers-reduced-motion:reduce){.lamp{transition:none}}
+</style>
+</head>
+<body>
+<h1>Pickleball Red Light Green Light</h1>
+
+<div class="seg" role="group" aria-label="Drill">
+  <button data-mode="hands" aria-pressed="true">Hands battle</button>
+  <button data-mode="trans" aria-pressed="false">Transition</button>
+</div>
+<div class="seg" role="group" aria-label="Speed">
+  <button data-spd="1.5" aria-pressed="false">Slow</button>
+  <button data-spd="1" aria-pressed="true">Medium</button>
+  <button data-spd="0.7" aria-pressed="false">Fast</button>
+</div>
+
+<div class="lights" aria-hidden="true">
+  <div class="lamp g" id="lg"></div><div class="lamp y" id="ly"></div>
+  <div class="lamp r" id="lr"></div><div class="lamp b" id="lb"></div>
+</div>
+<div id="say" aria-live="polite"><b>Ready</b><span>Press Start. Split step on red.</span></div>
+
+<canvas id="c" width="720" height="1040"></canvas>
+
+<div class="ctl">
+  <button id="go">Start</button>
+  <button id="snd" aria-pressed="false">Sound off</button>
+</div>
+<div class="meta"><span id="reps">Reps: 0</span><span id="hint">Green you hit · Red split step</span></div>
+
+<script>
+(()=>{
+const W=360,H=520,S=10.5,CX=180,NET=260,cv=document.getElementById('c'),g=cv.getContext('2d');
+g.scale(2,2);
+// Phase durations (ms): green, yellow, red, adjust, reset
+const MODES={
+ hands:{home:342,reach:34,back:0,t:[380,0,0,800,0],
+  L:['LEFT','Paddle left, short block. Feet quiet.'],
+  R:['RIGHT','Paddle right, short block. Feet quiet.'],
+  B:['CENTER','Paddle center, backhand up. Absorb it.'],
+  reset:'Paddle back to center, up and ready.'},
+ trans:{home:486,reach:56,back:12,t:[850,800,450,1000,0],
+  L:['LEFT','Step left, stay balanced, swing, then keep moving forward.'],
+  R:['RIGHT','Step right, stay balanced, swing, then keep moving forward.'],
+  B:['AT YOU','Half step back for space, swing, then keep moving forward.'],reset:''}
+};
+const BACK={home:486,reach:0,back:0,t:[0,0,0,0,2400],reset:'Walk back to the baseline. Next round starts on green.'};
+const STOPS=[438,390,342];
+const PH=['green','yellow','red','adjust','reset'];
+let mode='hands',spd=1,run=false,ph=0,t0=0,dir='L',reps=0,sound=false,ac=null;
+const $=id=>document.getElementById(id);
+const ease=t=>t<.5?2*t*t:1-Math.pow(-2*t+2,2)/2, lerp=(a,b,t)=>a+(b-a)*t;
+
+function beep(f,d=.09){ if(!sound)return; try{ac=ac||new (window.AudioContext||window.webkitAudioContext)();
+ const o=ac.createOscillator(),v=ac.createGain();o.frequency.value=f;o.connect(v);v.connect(ac.destination);
+ v.gain.setValueAtTime(.15,ac.currentTime);v.gain.exponentialRampToValueAtTime(.001,ac.currentTime+d);o.start();o.stop(ac.currentTime+d);}catch(e){} }
+
+function setPhase(i,now){
+ ph=i;t0=now;const m=MODES[mode];
+ if(i==0){dir=['L','R','B'][Math.random()*3|0];}
+ ['lg','ly','lr','lb'].forEach(id=>$(id).classList.remove('on'));
+ const lamp=['lg','ly','lr','lb','lb'][i];$(lamp).classList.add('on');
+ const say=$('say');
+ if(i==0)say.innerHTML='<b>GREEN: you hit</b><span>Strike, then watch the ball over the net.</span>';
+ if(i==1)say.innerHTML='<b>YELLOW: ball over</b><span>Stay balanced, paddle up.</span>';
+ if(i==2){say.innerHTML='<b>RED: split step!</b><span>Hop as the opponent makes contact.</span>';beep(300,.18);}
+ if(i==3){say.innerHTML='<b>'+m[dir][0]+'</b><span>'+m[dir][1]+'</span>';beep(dir=='L'?520:dir=='R'?780:650);}
+ if(i==4){say.innerHTML='<b>RESET</b><span>'+m.reset+'</span>';}
+ if(i==0)beep(880,.12);if(i==1)beep(600,.06);
+}
+
+function targetPos(){const m=MODES[mode];
+ return {x:CX+(dir=='L'?-m.reach:dir=='R'?m.reach:0), y:m.home+(dir=='B'?m.back:0)};}
+
+let st={px:CX,py:342,bx:CX,by:342,bv:true,hop:0,swing:0,p:0};
+let D={},sets=1,lastSec=-1;
+function resetD(){D={stage:'trans',i:0,hit:0,round:1,x0:CX,y0:mode=='trans'?486:MODES[mode].home,y1:STOPS[0]};}
+resetD();
+const cfg=()=>mode!='trans'?MODES[mode]:D.stage=='hands'?MODES.hands:D.stage=='back'?BACK:MODES.trans;
+const anchor=()=>mode!='trans'?MODES[mode].home:D.stage=='trans'?D.y1:342;
+const oppY=()=>mode=='trans'?178:520-MODES[mode].home;
+const hd=()=>mode=='hands'||(mode=='trans'&&D.stage=='hands');
+const REST=8000;
+function prog(){
+ if(mode=='hands'){$('reps').textContent='Set '+sets+' · Rep '+Math.min(reps+1,10)+'/10';return;}
+ if(mode!='trans')return;
+ $('reps').textContent='Round '+D.round+'/10';
+ $('hint').textContent=D.stage=='trans'?'Step '+(D.i+1)+'/3 to the kitchen':D.stage=='hands'?'Hands battle '+(D.hit+1)+'/5':'Back to baseline';}
+function setPhase(i,now){
+ ph=i;t0=now;lastSec=-1;const m=cfg(),tr=mode=='trans'&&D.stage=='trans',h=hd();
+ if(i==0){dir=['L','R','B'][Math.random()*3|0];}
+ ['lg','ly','lr','lb'].forEach(id=>$(id).classList.remove('on'));
+ const lamp=(i==3&&h)?'lr':['lg','ly','lr','lb','lb'][i];if(lamp)$(lamp).classList.add('on');
+ const say=$('say');
+ if(i==0)say.innerHTML=tr?'<b>GREEN: hit and move in</b><span>Move forward with the ball. Stay in control.</span>':'<b>GREEN: you hit</b><span>Strike, then watch the ball.</span>';
+ if(i==1)say.innerHTML=tr?'<b>YELLOW: slow down</b><span>Shorten your steps and decelerate.</span>':'<b>YELLOW: ball over</b><span>Stay balanced, paddle up.</span>';
+ if(i==2){say.innerHTML=tr?'<b>RED: fully stopped</b><span>Feet planted. Split step as the opponent hits.</span>':'<b>RED: split step!</b><span>Hop as the opponent makes contact.</span>';beep(300,.18);}
+ if(i==3){say.innerHTML=h?'<b>RED: split step · '+m[dir][0]+'</b><span>'+m[dir][1]+'</span>':'<b>'+m[dir][0]+'</b><span>'+m[dir][1]+'</span>';beep(dir=='L'?520:dir=='R'?780:650);}
+ if(i==4)say.innerHTML='<b>RESET</b><span>'+m.reset+'</span>';
+ if(i==0)beep(880,.12);if(i==1)beep(600,.06);
+ prog();
+}
+function done(){run=false;$('go').textContent='Start';['lg','ly','lr','lb'].forEach(id=>$(id).classList.remove('on'));
+ $('say').innerHTML='<b>Drill complete</b><span>10 rounds done. Nice work.</span>';}
+function advance(now){
+ if(mode=='hands'){
+  if(ph==0)return setPhase(3,now);
+  reps++;D.x0=st.px;D.y0=st.py;
+  return setPhase(reps>=10?5:0,now);}
+ if(hd()&&ph==0)return setPhase(3,now);
+ if(ph<3)return setPhase(ph+1,now);
+ if(ph==3){D.x0=st.px;D.y0=st.py;
+  if(D.stage=='trans'){if(D.i<2){D.i++;D.y1=STOPS[D.i];return setPhase(0,now);}D.stage='hands';D.hit=0;return setPhase(0,now);}
+  D.hit++;if(D.hit>=5){D.stage='back';return setPhase(4,now);}return setPhase(0,now);}
+ if(D.stage=='back'){if(D.round>=10)return done();D.round++;D.stage='trans';D.i=0;D.y1=STOPS[0];D.x0=CX;D.y0=486;return setPhase(0,now);}
+ D.x0=CX;D.y0=anchor();setPhase(0,now);
+}
+function targetPos(){const m=cfg();return {x:CX+(dir=='L'?-m.reach:dir=='R'?m.reach:0),y:anchor()+(dir=='B'?m.back:0)};}
+function update(now){
+ if(ph==5){const q=now-t0,e=ease(Math.min(q/600,1));st.bv=false;st.hop=0;st.swing=0;
+  st.px=lerp(D.x0,CX,e);st.py=lerp(D.y0,anchor(),e);
+  const sec=Math.ceil((REST-q)/1000);
+  if(sec!=lastSec){lastSec=sec;$('say').innerHTML='<b>Rest: '+sec+'</b><span>Shake it out. The next set starts on its own.</span>';}
+  if(q>=REST){sets++;reps=0;setPhase(0,now);}return;}
+ const m=cfg(),d=m.t[ph]*spd,p=Math.min((now-t0)/d,1),ay=anchor(),tg=targetPos(),opp={x:CX,y:oppY()},fw=mode=='trans'&&D.stage=='trans',h=hd();
+ st.p=p;st.hop=0;st.bv=true;st.swing=0;
+ if(ph==0){const e=ease(p);st.px=lerp(D.x0,CX,e);st.py=fw?lerp(D.y0,D.y1,.8*p):lerp(D.y0,ay,e);
+  st.bx=lerp(st.px,CX,e);st.by=lerp(st.py,h?opp.y:NET,e)-Math.sin(Math.PI*p)*14;st.swing=p<.35?1-p/.35:0;}
+ else if(ph==1){st.px=CX;st.py=fw?lerp(D.y0,D.y1,.8+.2*(1-(1-p)*(1-p))):ay;
+  st.bx=lerp(CX,opp.x,p);st.by=lerp(NET,opp.y,p)-Math.sin(Math.PI*p)*10;}
+ else if(ph==2){st.bx=opp.x;st.by=opp.y;st.px=CX;st.py=ay;st.hop=Math.sin(Math.PI*Math.min(p*1.4,1));}
+ else if(ph==3){const e=ease(p);st.bx=lerp(opp.x,tg.x,e);st.by=lerp(opp.y,tg.y-14,e)-Math.sin(Math.PI*p)*10;
+  const mv=h?ease(Math.min(Math.max((p-.25)/.5,0),1)):ease(Math.min(p/.75,1));
+  st.px=lerp(CX,tg.x,mv);st.py=lerp(ay,tg.y,mv);st.hop=h?Math.sin(Math.PI*Math.min(p/.4,1)):0;st.swing=p>.8?(p-.8)/.2:0;}
+ else{st.bv=false;const e=ease(p);
+  if(mode=='trans'&&D.stage=='back'){st.px=lerp(D.x0,CX,e);st.py=lerp(D.y0,486,e);}
+  else{st.px=lerp(tg.x,CX,e);st.py=lerp(tg.y,ay,e);}}
+ if(p>=1)advance(now);
+}
+
+function draw(){
+ const m=MODES[mode];
+ g.clearRect(0,0,W,H);
+ g.fillStyle=getComputedStyle(document.documentElement).getPropertyValue('--court');g.fillRect(0,0,W,H);
+ const L=CX-10*S,R=CX+10*S,T=NET-22*S,B=NET+22*S,k=7*S;
+ const LC=['#2ecc71','#f5c518','#e5484d','#4f8cff','#4f8cff'];
+ g.fillStyle=run&&ph<5?LC[hd()&&ph==3?2:ph]:getComputedStyle(document.documentElement).getPropertyValue('--kit');
+ g.fillRect(L,NET-k,20*S,2*k);
+ g.strokeStyle='#f4f7f2';g.lineWidth=2;g.strokeRect(L,T,20*S,44*S);
+ g.beginPath();g.moveTo(L,NET-k);g.lineTo(R,NET-k);g.moveTo(L,NET+k);g.lineTo(R,NET+k);
+ g.moveTo(CX,T);g.lineTo(CX,NET-k);g.moveTo(CX,NET+k);g.lineTo(CX,B);g.stroke();
+ g.lineWidth=4;g.strokeStyle='#14231c';g.beginPath();g.moveTo(L-8,NET);g.lineTo(R+8,NET);g.stroke();
+ g.font='600 11px system-ui';g.fillStyle=run&&ph==1?'rgba(20,35,28,.85)':'rgba(244,247,242,.85)';g.textAlign='left';
+ g.fillText('Kitchen (NVZ)',L+6,NET-k+14);g.fillText('Kitchen (NVZ)',L+6,NET+k-6);
+ // opponent
+ const oy=oppY();
+ g.fillStyle='#c9d3cd';g.beginPath();g.arc(CX,oy,11,0,7);g.fill();
+ g.fillStyle='rgba(20,35,28,.8)';g.fillRect(CX-3,oy-19,6,10);
+ // cue marker
+ const tg=targetPos();
+ if(ph==3||ph==2&&false){g.strokeStyle='#f5c518';g.lineWidth=2;g.setLineDash([4,4]);g.beginPath();g.arc(tg.x,tg.y-14,14,0,7);g.stroke();g.setLineDash([]);}
+ // big cue on court
+ if(ph==2||ph==3){
+  const lbl=ph==2?'SPLIT':(dir=='L'?'◀ LEFT':dir=='R'?'RIGHT ▶':'● '+cfg().B[0]);
+  g.textAlign='center';g.font='800 34px system-ui';g.fillStyle=ph==2?'#e5484d':'#f5c518';
+  g.strokeStyle='rgba(0,0,0,.35)';g.lineWidth=5;g.strokeText(lbl,CX,NET+k+60);g.fillText(lbl,CX,NET+k+60);
+ }
+ // player
+ const sc=1+st.hop*.18, py=st.py-st.hop*9;
+ g.save();g.translate(st.px,py);g.scale(sc,sc);
+ g.fillStyle='rgba(0,0,0,.25)';g.beginPath();g.ellipse(0,5+st.hop*6,12,6,0,0,7);g.fill();
+ g.fillStyle='#ffffff';g.beginPath();g.arc(0,0,12,0,7);g.fill();
+ g.strokeStyle='#14231c';g.lineWidth=2;g.stroke();
+ const sw=st.swing*.9;g.rotate(dir=='L'&&ph==3?-sw:sw*(dir=='R'?1:0));
+ g.fillStyle='#e5484d';g.fillRect(-4,-30,8,16);
+ g.restore();
+ // ball
+ if(st.bv){g.fillStyle='#d8ff3a';g.strokeStyle='#14231c';g.lineWidth=1.5;g.beginPath();g.arc(st.bx,st.by,7,0,7);g.fill();g.stroke();}
+}
+function loop(now){ if(run){update(now);} draw(); requestAnimationFrame(loop); }
+
+function start(){run=true;$('go').textContent='Pause';$('go').style.background='';reps=0;sets=1;$('reps').textContent='Reps: 0';resetD();setPhase(0,performance.now());}
+function pause(){run=false;$('go').textContent='Start';['lg','ly','lr','lb'].forEach(id=>$(id).classList.remove('on'));
+ $('say').innerHTML='<b>Paused</b><span>Press Start when ready.</span>';}
+$('go').onclick=()=>run?pause():start();
+$('snd').onclick=e=>{sound=!sound;e.target.textContent=sound?'Sound on':'Sound off';e.target.setAttribute('aria-pressed',sound);if(sound)beep(660);};
+document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{
+ mode=b.dataset.mode;document.querySelectorAll('[data-mode]').forEach(x=>x.setAttribute('aria-pressed',x==b));
+ resetD();st.px=CX;st.py=D.y0;$('hint').textContent=mode=='hands'?'Green you hit · Red split step':'';$('reps').textContent='Reps: 0';if(run)start();});
+document.querySelectorAll('[data-spd]').forEach(b=>b.onclick=()=>{
+ spd=+b.dataset.spd;document.querySelectorAll('[data-spd]').forEach(x=>x.setAttribute('aria-pressed',x==b));});
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
