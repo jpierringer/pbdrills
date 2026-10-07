@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Pickleball Footwork</title>
+<title>Pickleball Red Light Green Light</title>
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="apple-mobile-web-app-title" content="Pickle Lights">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -31,15 +31,41 @@ button:focus-visible{outline:3px solid var(--b);outline-offset:2px}
 #say{text-align:center;min-height:62px;margin:4px 0 8px}
 #say b{display:block;font-size:26px;letter-spacing:-.02em}
 #say span{color:var(--mute);font-size:15px}
-canvas{width:100%;display:block;border-radius:14px;touch-action:manipulation}
+#stage{position:relative;width:100%;aspect-ratio:720/1040}
+#stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block;border-radius:14px;touch-action:manipulation}
 .ctl{display:flex;gap:8px;margin-top:10px}
 .ctl #go{flex:2;background:var(--g);color:#06260f;border-color:var(--g);font-size:17px}
 .meta{display:flex;justify-content:space-between;color:var(--mute);font-size:14px;margin:8px 2px 0}
+@media (orientation:landscape){
+ html,body{height:100%;overflow:hidden}
+ body{max-width:none;margin:0;height:100dvh;padding:max(10px,env(safe-area-inset-top)) max(14px,env(safe-area-inset-right)) max(10px,env(safe-area-inset-bottom)) max(14px,env(safe-area-inset-left))}
+ #app{height:100%;display:grid;grid-template-columns:minmax(0,1fr) clamp(250px,32vw,560px);grid-template-rows:auto auto auto auto minmax(0,1fr) auto auto;column-gap:clamp(10px,2vw,28px);row-gap:clamp(6px,1.4vh,16px)}
+ #stage{aspect-ratio:auto;width:auto;grid-column:1;grid-row:1/-1;min-width:0;min-height:0}
+ #app>:not(#stage){grid-column:2}
+ h1{font-size:clamp(16px,2.5vw,42px);margin:0}
+ .seg,.ctl,.lights,.meta{margin:0}
+ .seg button,.ctl button{font-size:clamp(13px,1.6vw,26px);padding:clamp(6px,1.4vh,16px) 6px}
+ #app .ctl button,#app .ctl #go{font-size:clamp(13px,1.6vw,26px)}
+ .lights{padding:clamp(6px,1.6vh,18px);gap:clamp(6px,1vw,16px)}
+ .lamp{width:clamp(30px,min(5.2vw,12vh),100px);height:clamp(30px,min(5.2vw,12vh),100px)}
+ #say{min-height:0;margin:0;display:flex;flex-direction:column;justify-content:center}
+ #say b{font-size:clamp(20px,3.3vw,56px)}#say span{font-size:clamp(13px,1.7vw,28px)}
+ .meta{font-size:clamp(12px,1.4vw,24px)}
+}
+@media (orientation:landscape) and (max-height:520px){
+ h1{font-size:15px;white-space:nowrap}
+ #app{row-gap:5px}
+ .seg button,.ctl button,#app .ctl button,#app .ctl #go{font-size:13px;padding:6px 4px}
+ .lights{padding:5px}.lamp{width:28px;height:28px}
+ #say{overflow:hidden}#say b{font-size:19px;line-height:1.15}#say span{font-size:13px;line-height:1.25}
+ .meta{font-size:11px;white-space:nowrap;gap:6px}
+}
 @media (prefers-reduced-motion:reduce){.lamp{transition:none}}
 </style>
 </head>
 <body>
-<h1>Pickleball Footwork</h1>
+<div id="app">
+<h1>Pickleball Red Light Green Light</h1>
 
 <div class="seg" role="group" aria-label="Drill">
   <button data-mode="hands" aria-pressed="true">Hands battle</button>
@@ -57,18 +83,27 @@ canvas{width:100%;display:block;border-radius:14px;touch-action:manipulation}
 </div>
 <div id="say" aria-live="polite"><b>Ready</b><span>Press Start. Split step on red.</span></div>
 
-<canvas id="c" width="720" height="1040"></canvas>
+<div id="stage"><canvas id="c" width="720" height="1040"></canvas></div>
 
 <div class="ctl">
   <button id="go">Start</button>
   <button id="snd" aria-pressed="false">Sound off</button>
+  <button id="fs">Full screen</button>
 </div>
 <div class="meta"><span id="reps">Reps: 0</span><span id="hint">Green you hit · Red split step</span></div>
+</div>
 
 <script>
 (()=>{
 const W=360,H=520,S=10.5,CX=180,NET=260,cv=document.getElementById('c'),g=cv.getContext('2d');
-g.scale(2,2);
+let LAND=false,SC=2,OX=0,OY=0,lastW=0,lastH=0;
+function resize(){
+ LAND=innerWidth>innerHeight;
+ const dpr=Math.min(window.devicePixelRatio||1,2.5),w=Math.round(cv.clientWidth*dpr),h=Math.round(cv.clientHeight*dpr);
+ if(LAND){if(w>0&&h>0){cv.width=w;cv.height=h;}}else{cv.width=720;cv.height=1040;}
+ lastW=cv.clientWidth;lastH=cv.clientHeight;
+}
+addEventListener('resize',resize);addEventListener('orientationchange',()=>setTimeout(resize,250));
 // Phase durations (ms): green, yellow, red, adjust, reset
 const MODES={
  hands:{home:342,reach:34,back:0,t:[380,0,0,800,0],
@@ -175,36 +210,46 @@ function update(now){
  if(p>=1)advance(now);
 }
 
+function label(s,x,y,size,weight,fill,align,stroke){
+ g.font=weight+' '+size+'px system-ui,sans-serif';g.textAlign=align;g.textBaseline='alphabetic';
+ if(stroke){g.strokeStyle='rgba(0,0,0,.35)';g.lineWidth=5;g.lineJoin='round';g.strokeText(s,x,y);}
+ g.fillStyle=fill;g.fillText(s,x,y);}
 function draw(){
- const m=MODES[mode];
- g.clearRect(0,0,W,H);
- g.fillStyle=getComputedStyle(document.documentElement).getPropertyValue('--court');g.fillRect(0,0,W,H);
- const L=CX-10*S,R=CX+10*S,T=NET-22*S,B=NET+22*S,k=7*S;
+ if(cv.clientWidth!==lastW||cv.clientHeight!==lastH)resize();
+ // Landscape keeps the court up/down (you at the bottom) but stretches it wide to fill the screen.
+ const cw=cv.width,ch=cv.height,LH=LAND?380:H,LW=LAND?Math.max(LH*cw/ch,300):W;
+ const KX=LAND?Math.min(2.6,Math.max(1,(LW-70)/210)):1,KY=LAND?(LH-60)/462:1;
+ const fx=x=>LW/2+(x-CX)*KX,fy=y=>LH/2+(y-NET)*KY;
+ SC=Math.min(cw/LW,ch/LH);
+ g.setTransform(1,0,0,1,0,0);g.clearRect(0,0,cw,ch);
+ const cs=getComputedStyle(document.documentElement);
+ g.fillStyle=cs.getPropertyValue('--court');g.fillRect(0,0,cw,ch);
+ g.setTransform(SC,0,0,SC,(cw-LW*SC)/2,(ch-LH*SC)/2);
+ const L=fx(CX-10*S),R=fx(CX+10*S),T=fy(NET-22*S),B=fy(NET+22*S),k1=fy(NET-7*S),k2=fy(NET+7*S),NY=fy(NET),mx=fx(CX);
  const LC=['#2ecc71','#f5c518','#e5484d','#4f8cff','#4f8cff'];
- g.fillStyle=run&&ph<5?LC[hd()&&ph==3?2:ph]:getComputedStyle(document.documentElement).getPropertyValue('--kit');
- g.fillRect(L,NET-k,20*S,2*k);
- g.strokeStyle='#f4f7f2';g.lineWidth=2;g.strokeRect(L,T,20*S,44*S);
- g.beginPath();g.moveTo(L,NET-k);g.lineTo(R,NET-k);g.moveTo(L,NET+k);g.lineTo(R,NET+k);
- g.moveTo(CX,T);g.lineTo(CX,NET-k);g.moveTo(CX,NET+k);g.lineTo(CX,B);g.stroke();
- g.lineWidth=4;g.strokeStyle='#14231c';g.beginPath();g.moveTo(L-8,NET);g.lineTo(R+8,NET);g.stroke();
- g.font='600 11px system-ui';g.fillStyle=run&&ph==1?'rgba(20,35,28,.85)':'rgba(244,247,242,.85)';g.textAlign='left';
- g.fillText('Kitchen (NVZ)',L+6,NET-k+14);g.fillText('Kitchen (NVZ)',L+6,NET+k-6);
+ g.fillStyle=run&&ph<5?LC[hd()&&ph==3?2:ph]:cs.getPropertyValue('--kit');
+ g.fillRect(L,k1,R-L,k2-k1);
+ g.strokeStyle='#f4f7f2';g.lineWidth=2;g.strokeRect(L,T,R-L,B-T);
+ g.beginPath();g.moveTo(L,k1);g.lineTo(R,k1);g.moveTo(L,k2);g.lineTo(R,k2);
+ g.moveTo(mx,T);g.lineTo(mx,k1);g.moveTo(mx,k2);g.lineTo(mx,B);g.stroke();
+ g.lineWidth=4;g.strokeStyle='#14231c';g.beginPath();g.moveTo(L-8,NY);g.lineTo(R+8,NY);g.stroke();
+ const kf=run&&ph==1?'rgba(20,35,28,.85)':'rgba(244,247,242,.85)',kl=LAND?13:11;
+ label('Kitchen (NVZ)',L+8,k1+kl+4,kl,600,kf,'left');label('Kitchen (NVZ)',L+8,k2-8,kl,600,kf,'left');
  // opponent
- const oy=oppY();
- g.fillStyle='#c9d3cd';g.beginPath();g.arc(CX,oy,11,0,7);g.fill();
- g.fillStyle='rgba(20,35,28,.8)';g.fillRect(CX-3,oy-19,6,10);
+ const ox=fx(CX),oy=fy(oppY());
+ g.fillStyle='#c9d3cd';g.beginPath();g.arc(ox,oy,11,0,7);g.fill();
+ g.fillStyle='rgba(20,35,28,.8)';g.fillRect(ox-3,oy-19,6,10);
  // cue marker
  const tg=targetPos();
- if(ph==3||ph==2&&false){g.strokeStyle='#f5c518';g.lineWidth=2;g.setLineDash([4,4]);g.beginPath();g.arc(tg.x,tg.y-14,14,0,7);g.stroke();g.setLineDash([]);}
+ if(ph==3){g.strokeStyle='#f5c518';g.lineWidth=2;g.setLineDash([4,4]);g.beginPath();g.arc(fx(tg.x),fy(tg.y)-14,14,0,7);g.stroke();g.setLineDash([]);}
  // big cue on court
  if(ph==2||ph==3){
   const lbl=ph==2?'SPLIT':(dir=='L'?'◀ LEFT':dir=='R'?'RIGHT ▶':'● '+cfg().B[0]);
-  g.textAlign='center';g.font='800 34px system-ui';g.fillStyle=ph==2?'#e5484d':'#f5c518';
-  g.strokeStyle='rgba(0,0,0,.35)';g.lineWidth=5;g.strokeText(lbl,CX,NET+k+60);g.fillText(lbl,CX,NET+k+60);
+  label(lbl,mx,fy(LAND?NET-14*S:NET+7*S+60),LAND?44:34,800,ph==2?'#e5484d':'#f5c518','center',true);
  }
  // player
- const sc=1+st.hop*.18, py=st.py-st.hop*9;
- g.save();g.translate(st.px,py);g.scale(sc,sc);
+ const pc=1+st.hop*.18,px=fx(st.px),py=fy(st.py)-st.hop*9;
+ g.save();g.translate(px,py);g.scale(pc,pc);
  g.fillStyle='rgba(0,0,0,.25)';g.beginPath();g.ellipse(0,5+st.hop*6,12,6,0,0,7);g.fill();
  g.fillStyle='#ffffff';g.beginPath();g.arc(0,0,12,0,7);g.fill();
  g.strokeStyle='#14231c';g.lineWidth=2;g.stroke();
@@ -212,11 +257,11 @@ function draw(){
  g.fillStyle='#e5484d';g.fillRect(-4,-30,8,16);
  g.restore();
  // ball
- if(st.bv){g.fillStyle='#d8ff3a';g.strokeStyle='#14231c';g.lineWidth=1.5;g.beginPath();g.arc(st.bx,st.by,7,0,7);g.fill();g.stroke();}
+ if(st.bv){g.fillStyle='#d8ff3a';g.strokeStyle='#14231c';g.lineWidth=1.5;g.beginPath();g.arc(fx(st.bx),fy(st.by),7,0,7);g.fill();g.stroke();}
 }
 function loop(now){ if(run){update(now);} draw(); requestAnimationFrame(loop); }
 
-function start(){run=true;$('go').textContent='Pause';$('go').style.background='';reps=0;sets=1;$('reps').textContent='Reps: 0';resetD();setPhase(0,performance.now());}
+function start(){try{navigator.wakeLock&&navigator.wakeLock.request('screen').catch(()=>{});}catch(e){}run=true;$('go').textContent='Pause';$('go').style.background='';reps=0;sets=1;$('reps').textContent='Reps: 0';resetD();setPhase(0,performance.now());}
 function pause(){run=false;$('go').textContent='Start';['lg','ly','lr','lb'].forEach(id=>$(id).classList.remove('on'));
  $('say').innerHTML='<b>Paused</b><span>Press Start when ready.</span>';}
 $('go').onclick=()=>run?pause():start();
@@ -226,7 +271,10 @@ document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{
  resetD();st.px=CX;st.py=D.y0;$('hint').textContent=mode=='hands'?'Green you hit · Red split step':'';$('reps').textContent='Reps: 0';if(run)start();});
 document.querySelectorAll('[data-spd]').forEach(b=>b.onclick=()=>{
  spd=+b.dataset.spd;document.querySelectorAll('[data-spd]').forEach(x=>x.setAttribute('aria-pressed',x==b));});
-requestAnimationFrame(loop);
+const fsb=$('fs');
+if(!document.documentElement.requestFullscreen)fsb.style.display='none';
+else fsb.onclick=()=>document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen();
+resize();requestAnimationFrame(loop);
 })();
 </script>
 </body>
